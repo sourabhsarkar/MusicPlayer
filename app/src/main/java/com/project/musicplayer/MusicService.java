@@ -14,11 +14,20 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.provider.MediaStore;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Log;
+import android.view.View;
+import android.widget.CompoundButton;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.ToggleButton;
+
 import java.util.ArrayList;
 import java.util.Random;
 
@@ -26,7 +35,7 @@ import java.util.Random;
  * Created by Sourabh on 13-Mar-16.
  */
 public class MusicService extends Service implements SensorEventListener, MediaPlayer.OnPreparedListener,
-        MediaPlayer.OnErrorListener, MediaPlayer.OnCompletionListener, AudioManager.OnAudioFocusChangeListener {
+        MediaPlayer.OnErrorListener, MediaPlayer.OnCompletionListener, AudioManager.OnAudioFocusChangeListener, RecognitionListener{
 
     //media player
     private MediaPlayer player;
@@ -47,6 +56,11 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     //proximity sensor
     private SensorManager mSensorManager;
     private Sensor mProximity;
+
+    //Speech Recognizer
+    private SpeechRecognizer speech = null;
+    private Intent recognizerIntent;
+    private String LOG_TAG = "MusicService";
 
     //activity will bind to service
     @Override
@@ -72,6 +86,10 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         stopForeground(true);
         if(player != null) {
             player.release();
+        }
+        if (speech != null) {
+            speech.destroy();
+            Log.i(LOG_TAG, "destroy");
         }
         super.onDestroy();
     }
@@ -136,6 +154,17 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         mProximity = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
 
         mSensorManager.registerListener(this, mProximity, SensorManager.SENSOR_DELAY_NORMAL);
+
+        speech = SpeechRecognizer.createSpeechRecognizer(this);
+        speech.setRecognitionListener(this);
+
+        recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en");
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, this.getPackageName());
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+
+        speech.startListening(recognizerIntent);
     }
 
     //set shuffle on or off
@@ -210,8 +239,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     @Override
     public void onSensorChanged(SensorEvent sensorEvent) {
         if(sensorEvent.values[0] == 0) {
-            if(player.isPlaying())
-                playNext();
+                speech.startListening(recognizerIntent);
         }
     }
 
@@ -304,5 +332,102 @@ public class MusicService extends Service implements SensorEventListener, MediaP
             }
         }
         playSong();
+    }
+
+    @Override
+    public void onBeginningOfSpeech() {
+        Log.i(LOG_TAG, "onBeginningOfSpeech");
+    }
+
+    @Override
+    public void onBufferReceived(byte[] buffer) {
+        Log.i(LOG_TAG, "onBufferReceived: " + buffer);
+    }
+
+    @Override
+    public void onEndOfSpeech() {
+        Log.i(LOG_TAG, "onEndOfSpeech");
+        speech.stopListening();
+    }
+
+    @Override
+    public void onError(int errorCode) {
+        String errorMessage = getErrorText(errorCode);
+        Log.d(LOG_TAG, "FAILED " + errorMessage);
+        speech.stopListening();
+    }
+
+    @Override
+    public void onEvent(int arg0, Bundle arg1) {
+        Log.i(LOG_TAG, "onEvent");
+    }
+
+    @Override
+    public void onPartialResults(Bundle arg0) {
+        Log.i(LOG_TAG, "onPartialResults");
+    }
+
+    @Override
+    public void onReadyForSpeech(Bundle arg0) {
+        Log.i(LOG_TAG, "onReadyForSpeech");
+    }
+
+    @Override
+    public void onResults(Bundle results) {
+        Log.i(LOG_TAG, "onResults");
+        ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        if(matches != null) {
+            if (matches.contains("start")) {
+                playSong();
+            } else if (matches.contains("stop") || matches.contains("pause")) {
+                pausePlayer();
+            } else if (matches.contains("next")) {
+                playNext();
+            } else if (matches.contains("previous")) {
+                playPrev();
+            }
+        }
+    }
+
+    @Override
+    public void onRmsChanged(float rmsdB) {
+        Log.i(LOG_TAG, "onRmsChanged: " + rmsdB);
+    }
+
+    public static String getErrorText(int errorCode) {
+        String message;
+        switch (errorCode) {
+            case SpeechRecognizer.ERROR_AUDIO:
+                message = "Audio recording error";
+                break;
+            case SpeechRecognizer.ERROR_CLIENT:
+                message = "Client side error";
+                break;
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                message = "Insufficient permissions";
+                break;
+            case SpeechRecognizer.ERROR_NETWORK:
+                message = "Network error";
+                break;
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+                message = "Network timeout";
+                break;
+            case SpeechRecognizer.ERROR_NO_MATCH:
+                message = "No match";
+                break;
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                message = "RecognitionService busy";
+                break;
+            case SpeechRecognizer.ERROR_SERVER:
+                message = "error from server";
+                break;
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                message = "No speech input";
+                break;
+            default:
+                message = "Didn't understand, please try again.";
+                break;
+        }
+        return message;
     }
 }
