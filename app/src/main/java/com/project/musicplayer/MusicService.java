@@ -3,9 +3,11 @@ package com.project.musicplayer;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -24,6 +26,7 @@ import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.ProgressBar;
@@ -66,6 +69,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     private String LOG_TAG = "MusicService";
 
     boolean isPaused;
+    MediaButtonIntentReceiver mMediaButtonReceiver;
 
     //activity will bind to service
     @Override
@@ -83,9 +87,47 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         return false;
     }
 
+    //on service created
+    @Override
+    public void onCreate() {
+        //create the service
+        super.onCreate();
+        //initialize position
+        songPosn=0;
+        //create player
+        player = new MediaPlayer();
+        initMusicPlayer();
+        rand = new Random();
+
+        audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
+        //audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+
+        mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        mProximity = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
+
+        mSensorManager.registerListener(this, mProximity, SensorManager.SENSOR_DELAY_NORMAL);
+
+        speech = SpeechRecognizer.createSpeechRecognizer(this);
+        speech.setRecognitionListener(this);
+
+        recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en");
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, this.getPackageName());
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+
+        //speech.startListening(recognizerIntent);
+        mMediaButtonReceiver = new MediaButtonIntentReceiver();
+        IntentFilter mediaFilter = new IntentFilter(Intent.ACTION_MEDIA_BUTTON);
+        mediaFilter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY);
+        registerReceiver(mMediaButtonReceiver, mediaFilter);
+    }
+
     //on service destroy
     @Override
     public void onDestroy() {
+        if(mMediaButtonReceiver != null)
+            unregisterReceiver(mMediaButtonReceiver);
         if (speech != null) {
             speech.stopListening();
             speech.destroy();
@@ -143,38 +185,6 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         // Broadcast intent to activity to let it know the media player has been prepared
         Intent onPreparedIntent = new Intent("MEDIA_PLAYER_PREPARED");
         LocalBroadcastManager.getInstance(this).sendBroadcast(onPreparedIntent);
-    }
-
-    //on service created
-    @Override
-    public void onCreate() {
-        //create the service
-        super.onCreate();
-        //initialize position
-        songPosn=0;
-        //create player
-        player = new MediaPlayer();
-        initMusicPlayer();
-        rand = new Random();
-
-        audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
-        //audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
-
-        mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        mProximity = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
-
-        mSensorManager.registerListener(this, mProximity, SensorManager.SENSOR_DELAY_NORMAL);
-
-        speech = SpeechRecognizer.createSpeechRecognizer(this);
-        speech.setRecognitionListener(this);
-
-        recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en");
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, this.getPackageName());
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
-
-        //speech.startListening(recognizerIntent);
     }
 
     //set shuffle on or off
@@ -335,7 +345,6 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         player.start();
     }
 
-
     //skip to previous track
     public void playPrev() {
         songPosn--;
@@ -344,6 +353,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         }
         playSong();
     }
+
     //skip to next track
     public void playNext() {
         if(shuffle) {
@@ -473,5 +483,45 @@ public class MusicService extends Service implements SensorEventListener, MediaP
                 break;
         }
         return message;
+    }
+
+    public class MediaButtonIntentReceiver extends BroadcastReceiver {
+
+        public MediaButtonIntentReceiver() {
+            super();
+        }
+
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String intentAction = intent.getAction();
+            if (!Intent.ACTION_MEDIA_BUTTON.equals(intentAction)) {
+                return;
+            }
+            KeyEvent event = (KeyEvent)intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+            if (event == null) {
+                return;
+            }
+            int action = event.getAction();
+            if (action == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+                if(player.isPlaying()) {
+                    player.pause();
+                    isPaused = true;
+                }
+                speech.stopListening();
+                speech.startListening(recognizerIntent);
+                //Delay playback for 4 secs
+                final Handler handler = new Handler();
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        // Do something after 4s = 4000ms
+                        if(isPaused)
+                            player.start();
+                    }
+                }, 4000);
+                speech.stopListening();
+            }
+            abortBroadcast();
+        }
     }
 }
