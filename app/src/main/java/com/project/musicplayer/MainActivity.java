@@ -2,11 +2,13 @@ package com.project.musicplayer;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
@@ -15,6 +17,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.provider.MediaStore;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
@@ -107,7 +110,6 @@ public class MainActivity extends AppCompatActivity implements MediaController.M
                     Toast.makeText(this, "You have not given required permissions!",Toast.LENGTH_SHORT).show();
                     finish();
                 }
-                return;
             }
 
             // other 'case' lines to check for other
@@ -163,17 +165,16 @@ public class MainActivity extends AppCompatActivity implements MediaController.M
             Log.e("MainActivity","View is null");
         musicSrv.playSong();
         if(playbackPaused) {
-            controller.hide();
             setController();
             playbackPaused = false;
         }
-        //controller.hide();
         controller.show(0);
     }
 
     //set the controller up
     private void setController() {
-        controller = new MusicController(this);
+        if(controller == null)
+            controller = new MusicController(this);
         //set previous and next button listeners
         controller.setPrevNextListeners(new View.OnClickListener() {
             @Override
@@ -199,7 +200,6 @@ public class MainActivity extends AppCompatActivity implements MediaController.M
             setController();
             playbackPaused =false;
         }
-        controller.hide();
         controller.show(0);
     }
 
@@ -210,7 +210,6 @@ public class MainActivity extends AppCompatActivity implements MediaController.M
             setController();
             playbackPaused = false;
         }
-        controller.hide();
         controller.show(0);
     }
 
@@ -260,7 +259,9 @@ public class MainActivity extends AppCompatActivity implements MediaController.M
         if(paused) {
             setController();
             paused = false;
-        }
+        }// Set up receiver for media player onPrepared broadcast
+        LocalBroadcastManager.getInstance(this).registerReceiver(onPrepareReceiver,
+                new IntentFilter("MEDIA_PLAYER_PREPARED"));
     }
 
     @Override
@@ -272,8 +273,8 @@ public class MainActivity extends AppCompatActivity implements MediaController.M
 
     @Override
     protected void onStop() {
-        controller.hide();
         super.onStop();
+        controller.invalidate();
     }
 
 
@@ -340,5 +341,19 @@ public class MainActivity extends AppCompatActivity implements MediaController.M
     @Override
     public int getAudioSessionId() {
         return 0;
+    }
+
+    // Broadcast receiver to determine when music player has been prepared
+    private BroadcastReceiver onPrepareReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            // When music player has been prepared, show controller
+            controller.show(0);
+        }
+    };
+
+    //Disable back button
+    @Override
+    public void onBackPressed() {
     }
 }

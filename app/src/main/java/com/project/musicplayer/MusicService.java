@@ -15,17 +15,20 @@ import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.widget.ToggleButton;
 
 import java.util.ArrayList;
@@ -35,7 +38,7 @@ import java.util.Random;
  * Created by Sourabh on 13-Mar-16.
  */
 public class MusicService extends Service implements SensorEventListener, MediaPlayer.OnPreparedListener,
-        MediaPlayer.OnErrorListener, MediaPlayer.OnCompletionListener, AudioManager.OnAudioFocusChangeListener, RecognitionListener{
+        MediaPlayer.OnErrorListener, MediaPlayer.OnCompletionListener, RecognitionListener{
 
     //media player
     private MediaPlayer player;
@@ -46,7 +49,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     //title of current song
     private String songTitle="";
     //notification id
-    private static final int NOTIFY_ID=1;
+    private static final int NOTIFY_ID = 1;
     //shuffle flag and random
     private boolean shuffle = false;
     private Random rand;
@@ -61,6 +64,8 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     private SpeechRecognizer speech = null;
     private Intent recognizerIntent;
     private String LOG_TAG = "MusicService";
+
+    boolean isPaused;
 
     //activity will bind to service
     @Override
@@ -81,15 +86,16 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     //on service destroy
     @Override
     public void onDestroy() {
+        if (speech != null) {
+            speech.stopListening();
+            speech.destroy();
+            Log.i(LOG_TAG, "destroy");
+        }
         if(mSensorManager != null)
             mSensorManager.unregisterListener(this);
         stopForeground(true);
         if(player != null) {
             player.release();
-        }
-        if (speech != null) {
-            speech.destroy();
-            Log.i(LOG_TAG, "destroy");
         }
         super.onDestroy();
     }
@@ -133,6 +139,10 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         Notification not = builder.build();
 
         startForeground(NOTIFY_ID, not);
+
+        // Broadcast intent to activity to let it know the media player has been prepared
+        Intent onPreparedIntent = new Intent("MEDIA_PLAYER_PREPARED");
+        LocalBroadcastManager.getInstance(this).sendBroadcast(onPreparedIntent);
     }
 
     //on service created
@@ -148,7 +158,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         rand = new Random();
 
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
-        audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+        //audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
 
         mSensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         mProximity = mSensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
@@ -162,9 +172,9 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en");
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, this.getPackageName());
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
-        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
 
-        speech.startListening(recognizerIntent);
+        //speech.startListening(recognizerIntent);
     }
 
     //set shuffle on or off
@@ -192,6 +202,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         songs = theSongs;
     }
 
+    /*
     //on another activity priority (example incoming call)
     @Override
     public void onAudioFocusChange(int i) {
@@ -234,12 +245,29 @@ public class MusicService extends Service implements SensorEventListener, MediaP
                 break;
         }
     }
+    */
 
     //on proximity sensor changed
     @Override
     public void onSensorChanged(SensorEvent sensorEvent) {
         if(sensorEvent.values[0] == 0) {
-                speech.startListening(recognizerIntent);
+            if(player.isPlaying()) {
+                player.pause();
+                isPaused = true;
+            }
+            speech.stopListening();
+            speech.startListening(recognizerIntent);
+            //Delay playback for 4 secs
+            final Handler handler = new Handler();
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    // Do something after 4s = 4000ms
+                    if(isPaused)
+                        player.start();
+                }
+            }, 4000);
+                speech.stopListening();
         }
     }
 
@@ -279,7 +307,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     }
 
     //playback methods
-    public  void setSong(int songIndex) {
+    public void setSong(int songIndex) {
         songPosn = songIndex;
     }
 
@@ -347,14 +375,13 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     @Override
     public void onEndOfSpeech() {
         Log.i(LOG_TAG, "onEndOfSpeech");
-        speech.stopListening();
     }
 
     @Override
     public void onError(int errorCode) {
         String errorMessage = getErrorText(errorCode);
         Log.d(LOG_TAG, "FAILED " + errorMessage);
-        speech.stopListening();
+        //speech.stopListening();
     }
 
     @Override
@@ -377,16 +404,33 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         Log.i(LOG_TAG, "onResults");
         ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         if(matches != null) {
-            if (matches.contains("start")) {
+            if (matches.contains("start")|| matches.contains("play")) {
                 playSong();
-            } else if (matches.contains("stop") || matches.contains("pause")) {
+                isPaused = false;
+                Log.d("Voice", "start");
+            } else if (matches.contains("resume")) {
+                player.start();
+                isPaused = false;
+                Log.d("Voice","resume");
+            }
+            else if (matches.contains("stop") || matches.contains("pause")) {
                 pausePlayer();
+                isPaused = false;
+                Log.d("Voice", "stop");
             } else if (matches.contains("next")) {
                 playNext();
+                isPaused = false;
+                Log.d("Voice", "next");
             } else if (matches.contains("previous")) {
                 playPrev();
+                isPaused = false;
+                Log.d("Voice", "prev");
+            }
+            else {
+                Toast.makeText(getApplicationContext(),"Please try again!",Toast.LENGTH_SHORT).show();
             }
         }
+        speech.stopListening();
     }
 
     @Override
@@ -394,7 +438,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         Log.i(LOG_TAG, "onRmsChanged: " + rmsdB);
     }
 
-    public static String getErrorText(int errorCode) {
+    public String getErrorText(int errorCode) {
         String message;
         switch (errorCode) {
             case SpeechRecognizer.ERROR_AUDIO:
