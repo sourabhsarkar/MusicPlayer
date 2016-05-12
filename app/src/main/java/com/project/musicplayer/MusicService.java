@@ -69,7 +69,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
     private String LOG_TAG = "MusicService";
 
     boolean isPaused;
-    MediaButtonIntentReceiver mMediaButtonReceiver;
+    //MediaButtonIntentReceiver mMediaButtonReceiver;
 
     //activity will bind to service
     @Override
@@ -116,18 +116,22 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
         recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
 
-        //speech.startListening(recognizerIntent);
+        /*
+        speech.startListening(recognizerIntent);
         mMediaButtonReceiver = new MediaButtonIntentReceiver();
         IntentFilter mediaFilter = new IntentFilter(Intent.ACTION_MEDIA_BUTTON);
         mediaFilter.setPriority(IntentFilter.SYSTEM_HIGH_PRIORITY);
         registerReceiver(mMediaButtonReceiver, mediaFilter);
+        */
     }
 
     //on service destroy
     @Override
     public void onDestroy() {
+        /*
         if(mMediaButtonReceiver != null)
             unregisterReceiver(mMediaButtonReceiver);
+        */
         if (speech != null) {
             speech.stopListening();
             speech.destroy();
@@ -485,6 +489,7 @@ public class MusicService extends Service implements SensorEventListener, MediaP
         return message;
     }
 
+    /*
     public class MediaButtonIntentReceiver extends BroadcastReceiver {
 
         public MediaButtonIntentReceiver() {
@@ -524,4 +529,5 @@ public class MusicService extends Service implements SensorEventListener, MediaP
             abortBroadcast();
         }
     }
+    */
 }
